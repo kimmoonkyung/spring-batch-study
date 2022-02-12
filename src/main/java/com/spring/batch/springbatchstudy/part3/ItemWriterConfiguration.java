@@ -56,6 +56,28 @@ public class ItemWriterConfiguration {
                 .build();
     }
 
+    private ItemWriter<Person> csvItemWriter() throws Exception {
+        BeanWrapperFieldExtractor<Person> fieldExtractor = new BeanWrapperFieldExtractor<>();
+        fieldExtractor.setNames(new String[] {"id", "name", "age", "address"});
+
+        DelimitedLineAggregator<Person> lineAggregator = new DelimitedLineAggregator<>();
+        lineAggregator.setDelimiter(",");
+        lineAggregator.setFieldExtractor(fieldExtractor);
+
+        FlatFileItemWriter<Person> itemWriter = new FlatFileItemWriterBuilder<Person>()
+                .name("csvFileItemWriter")
+                .encoding("UTF-8")
+                .resource(new FileSystemResource("output/test-output.csv")) // file을 생성하기 위해선 FileSystemResource를 사용한다.
+                .lineAggregator(lineAggregator)
+                .headerCallback(writer -> writer.write("id,이름,나이,거주지"))
+                .footerCallback(writer -> writer.write("--------작업 끗--------\n"))
+                .append(true) // 새로운 데이터 쓰기 (덮어쓰기 X 뒤에 씀) 개행 문자를 추가해야함
+                .build();
+        itemWriter.afterPropertiesSet();
+
+        return itemWriter;
+    }
+
     @Bean
     public Step jdbcBatchItemWriterStep() {
         return stepBuilderFactory.get("jdbcBatchItemWriterStep")
@@ -88,28 +110,6 @@ public class ItemWriterConfiguration {
                 .dataSource(dataSource)
                 .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>()) // Person 클래스를 파라미터로 자동으로 생성할 수 있는 프로바이더
                 .sql("insert into person(name, age, address) values(:name, :age, :address)")
-                .build();
-        itemWriter.afterPropertiesSet();
-
-        return itemWriter;
-    }
-
-    private ItemWriter<Person> csvItemWriter() throws Exception {
-        BeanWrapperFieldExtractor<Person> fieldExtractor = new BeanWrapperFieldExtractor<>();
-        fieldExtractor.setNames(new String[] {"id", "name", "age", "address"});
-
-        DelimitedLineAggregator<Person> lineAggregator = new DelimitedLineAggregator<>();
-        lineAggregator.setDelimiter(",");
-        lineAggregator.setFieldExtractor(fieldExtractor);
-
-        FlatFileItemWriter<Person> itemWriter = new FlatFileItemWriterBuilder<Person>()
-                .name("csvFileItemWriter")
-                .encoding("UTF-8")
-                .resource(new FileSystemResource("output/test-output.csv")) // file을 생성하기 위해선 FileSystemResource를 사용한다.
-                .lineAggregator(lineAggregator)
-                .headerCallback(writer -> writer.write("id,이름,나이,거주지"))
-                .footerCallback(writer -> writer.write("--------작업 끗--------\n"))
-                .append(true) // 새로운 데이터 쓰기 (덮어쓰기 X 뒤에 씀) 개행 문자를 추가해야함
                 .build();
         itemWriter.afterPropertiesSet();
 

@@ -22,7 +22,7 @@ public class SavePersonConfigurationTest {
     @Autowired
     private JobLauncherTestUtils jobLauncherTestUtils;
 
-    @Autowired
+    @Autowired(required = false)
     private PersonRepository personRepository;
 
     @After
