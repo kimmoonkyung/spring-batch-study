@@ -13,10 +13,13 @@ import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.FlowBuilder;
 import org.springframework.batch.core.job.flow.Flow;
 import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.partition.PartitionHandler;
+import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.step.tasklet.TaskletStep;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
@@ -64,12 +67,9 @@ public class ParallelUserConfiguration {
         return this.jobBuilderFactory.get(JOB_NAME)
                 .incrementer(new RunIdIncrementer())
 //                .start(this.saveUserStep())
-                .start(this.saveUserFlow())
-                .next(this.userLevelUpStep())
                 .listener(new LevelUpJobExecutionListener(userRepository))
-                .next(new JobParametersDecide("date"))
-                .on(JobParametersDecide.CONTINUE.getName())
-                .to(this.orderStatisticsStep(null))
+                .start(this.saveUserFlow())
+                .next(this.splitFlow(null))
                 .build()
                 .build();
     }
@@ -85,9 +85,33 @@ public class ParallelUserConfiguration {
                 .build();
     }
 
-    @Bean(JOB_NAME + "_orderStatisticsStep")
+    @Bean(JOB_NAME + "_splitFlow")
     @JobScope
-    public Step orderStatisticsStep(@Value("#{jobParameters[date]}") String date) throws Exception {
+    public Flow splitFlow(@Value("#{jobParameters[date]}") String date) throws Exception {
+        // orderLevelUpStep과 orderStatisticsStep을 하나의 FLOW로 만들 것임.
+        Flow userLevelUpFlow = new FlowBuilder<SimpleFlow>("_userLevelUpFlow")
+//                .start(userLevelUpStep())
+                .start(userLevelUpManagerStep())
+                .build();
+
+        return new FlowBuilder<SimpleFlow>(JOB_NAME + "_splitFlow")
+                .split(this.taskExecutor)
+                .add(userLevelUpFlow, orderStatisticsFlow(date))
+                .build();
+    }
+
+    private Flow orderStatisticsFlow(String date) throws Exception {
+        return new FlowBuilder<SimpleFlow>(JOB_NAME + "_orderStatisticsStep")
+                .start(new JobParametersDecide("date"))
+                .on(JobParametersDecide.CONTINUE.getName())
+                .to(this.orderStatisticsStep(date))
+                .build();
+
+    }
+
+//    @Bean(JOB_NAME + "_orderStatisticsStep")
+//    @JobScope // splitFlow 생성으로 필요없어짐
+    private Step orderStatisticsStep(@Value("#{jobParameters[date]}") String date) throws Exception {
         return this.stepBuilderFactory.get(JOB_NAME + "_orderStatisticsStep")
                 .<OrderStatistics, OrderStatistics>chunk(CHUNK)
                 .reader(orderStatisticsItemReader(date))
@@ -160,7 +184,7 @@ public class ParallelUserConfiguration {
     public Step userLevelUpStep() throws Exception {
         return this.stepBuilderFactory.get(JOB_NAME + "_userLevelUpStep")
                 .<User, User>chunk(CHUNK)
-                .reader(itemReader())
+                .reader(itemReader(null, null))
                 .processor(itemProcessor())
                 .writer(itemWriter())
                 .build();
@@ -183,7 +207,7 @@ public class ParallelUserConfiguration {
         };
     }
 
-    private ItemReader<? extends User> itemReader() throws Exception {
+    /*private ItemReader<? extends User> itemReader() throws Exception {
         JpaPagingItemReader<User> itemReader = new JpaPagingItemReaderBuilder<User>()
                 .queryString("select u from User u")
                 .entityManagerFactory(entityManagerFactory)
@@ -193,6 +217,46 @@ public class ParallelUserConfiguration {
         itemReader.afterPropertiesSet();
 
         return itemReader;
+    }*/
+
+    @Bean(JOB_NAME + "_userItemReader") // @Bean 이름을 설정하지 않으면 메소드명이 @Bean 이름이 된다
+    @StepScope
+    JpaPagingItemReader<? extends User> itemReader(@Value("#{stepExecutionContext[minId]}") Long minId,
+                                                   @Value("#{stepExecutionContext[maxId]}") Long maxId) throws Exception {
+
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("minId", minId);
+        parameters.put("maxId", maxId);
+
+        JpaPagingItemReader<User> itemReader = new JpaPagingItemReaderBuilder<User>()
+                .queryString("select u from User u where u.id between :minId and :maxId")
+                .parameterValues(parameters)
+                .entityManagerFactory(entityManagerFactory)
+                .pageSize(CHUNK) // chunk size 와 동일하게 설정
+                .name(JOB_NAME + "_userItemReader")
+                .build();
+        itemReader.afterPropertiesSet();
+
+        return itemReader;
+    }
+
+    @Bean(JOB_NAME + "_userLevelUpStep.manager")
+    public Step userLevelUpManagerStep() throws Exception {
+        return this.stepBuilderFactory.get(JOB_NAME + "_userLevelUpStep.manager")
+                .partitioner(JOB_NAME + "_userLevelUpStep.manager", new UserLevelUpPartitioner(userRepository))
+                .step(userLevelUpStep())
+                .partitionHandler(taskExecutorPartitionHandler())
+                .build();
+    }
+
+    @Bean(JOB_NAME + "_taskExecutorPartitionHandler")
+    PartitionHandler taskExecutorPartitionHandler() throws Exception {
+        TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
+        handler.setStep(userLevelUpStep());
+        handler.setTaskExecutor(this.taskExecutor);
+        handler.setGridSize(8); // UserLevelUpPartitioner의 partition(`int gridSize`)이다.
+
+        return handler;
     }
 
 }
