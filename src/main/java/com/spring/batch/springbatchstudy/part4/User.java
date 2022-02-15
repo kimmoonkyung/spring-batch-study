@@ -23,7 +23,9 @@ public class User {
     @Enumerated(EnumType.STRING)
     private Level level = Level.NORMAL;
 
-    @OneToMany(cascade = CascadeType.PERSIST) // entity 매핑 설정을 유저는 n개의 오더를 가질 수 있으니 원투 매니 / 유저가 저장되면서 오더를 같이 저장할 수 있도록 cascade persist 설정
+    // entity 매핑 설정을 유저는 n개의 오더를 가질 수 있으니 원투 매니 / 유저가 저장되면서 오더를 같이 저장할 수 있도록 cascade persist 설정
+    // availableLevelUp
+    @OneToMany(cascade = CascadeType.PERSIST, fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id")
     private List<Orders> orders;
 

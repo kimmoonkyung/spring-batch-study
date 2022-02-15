@@ -14,7 +14,7 @@ import java.util.List;
 //@RequiredArgsConstructor
 public class SaveUserTasklet implements Tasklet { // user를 저장하기 위한 tasklet
 
-    private final int SIZE = 100;
+    private final int SIZE = 10_000;
     private final UserRepository userRepository;
 
     public SaveUserTasklet(UserRepository userRepository) {
